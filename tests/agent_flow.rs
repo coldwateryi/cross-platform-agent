@@ -25,7 +25,11 @@ async fn run_git(args: &[&str], cwd: Option<&Path>) {
     }
 
     let status = command.status().await.expect("git should start");
-    assert!(status.success(), "git command failed: git {}", args.join(" "));
+    assert!(
+        status.success(),
+        "git command failed: git {}",
+        args.join(" ")
+    );
 }
 
 async fn run_git_capture(args: &[&str], cwd: Option<&Path>) -> String {
@@ -57,7 +61,11 @@ async fn create_remote_repo(root: &Path) -> PathBuf {
     tokio::fs::create_dir_all(&seed_repo).await.unwrap();
     run_git(&["init", "-b", "main"], Some(&seed_repo)).await;
     run_git(&["config", "user.name", "Agent Test"], Some(&seed_repo)).await;
-    run_git(&["config", "user.email", "agent@example.com"], Some(&seed_repo)).await;
+    run_git(
+        &["config", "user.email", "agent@example.com"],
+        Some(&seed_repo),
+    )
+    .await;
     tokio::fs::write(seed_repo.join("README.md"), "# Seed Repo\n")
         .await
         .unwrap();
@@ -78,7 +86,12 @@ async fn create_remote_repo(root: &Path) -> PathBuf {
     bare_repo
 }
 
-async fn wait_for_task(client: &reqwest::Client, base_url: &str, token: &str, task_id: &str) -> Value {
+async fn wait_for_task(
+    client: &reqwest::Client,
+    base_url: &str,
+    token: &str,
+    task_id: &str,
+) -> Value {
     for _ in 0..120 {
         let response = client
             .get(format!("{base_url}/tasks/{task_id}"))
@@ -99,12 +112,18 @@ async fn wait_for_task(client: &reqwest::Client, base_url: &str, token: &str, ta
 }
 
 async fn next_message(
-    stream: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    stream: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     kind: &str,
     request_id: Option<&str>,
 ) -> Value {
     loop {
-        let message = stream.next().await.expect("message expected").expect("valid ws frame");
+        let message = stream
+            .next()
+            .await
+            .expect("message expected")
+            .expect("valid ws frame");
         if let Message::Text(text) = message {
             let payload: Value = serde_json::from_str(&text).unwrap();
             if payload["type"].as_str() == Some(kind)
@@ -119,7 +138,9 @@ async fn next_message(
 }
 
 async fn wait_for_ws_task(
-    stream: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    stream: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     request_id: &str,
 ) -> Value {
     let accepted = next_message(stream, "task.accepted", Some(request_id)).await;
@@ -144,11 +165,12 @@ async fn rest_and_websocket_execute_git_actions_and_command_run() {
     let clone_path = temp_dir.path().join("workspace").join("clone");
     let collaborator_path = temp_dir.path().join("workspace").join("collaborator");
     let token = "test-token";
+    let ws_path = "/socket/agent".to_string();
 
     let config = Config {
         host: "127.0.0.1".to_string(),
         port: 0,
-        ws_path: "/ws".to_string(),
+        ws_path: ws_path.clone(),
         api_token: Some(token.to_string()),
         allowed_roots: vec![allowed_root.clone()],
         command_timeout: Duration::from_secs(30),
@@ -161,7 +183,7 @@ async fn rest_and_websocket_execute_git_actions_and_command_run() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let base_url = format!("http://{}", address);
-    let ws_url = format!("ws://{}/ws?token={token}", address);
+    let ws_url = format!("ws://{}{}?token={token}", address, ws_path);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     let server_task = tokio::spawn(serve(listener, runtime, async move {
@@ -190,7 +212,9 @@ async fn rest_and_websocket_execute_git_actions_and_command_run() {
     let clone_task = wait_for_task(&client, &base_url, token, &clone_task_id).await;
     assert_eq!(clone_task["status"].as_str(), Some("succeeded"));
     assert_eq!(
-        tokio::fs::read_to_string(clone_path.join("README.md")).await.unwrap(),
+        tokio::fs::read_to_string(clone_path.join("README.md"))
+            .await
+            .unwrap(),
         "# Seed Repo\n"
     );
 
@@ -220,7 +244,11 @@ async fn rest_and_websocket_execute_git_actions_and_command_run() {
     assert_eq!(checkout_task["status"].as_str(), Some("succeeded"));
 
     run_git(&["config", "user.name", "Agent Test"], Some(&clone_path)).await;
-    run_git(&["config", "user.email", "agent@example.com"], Some(&clone_path)).await;
+    run_git(
+        &["config", "user.email", "agent@example.com"],
+        Some(&clone_path),
+    )
+    .await;
     tokio::fs::write(clone_path.join("feature.txt"), "hello from branch\n")
         .await
         .unwrap();
@@ -244,6 +272,42 @@ async fn rest_and_websocket_execute_git_actions_and_command_run() {
 
     let add_task = wait_for_ws_task(&mut ws_stream, "add-1").await;
     assert_eq!(add_task["status"].as_str(), Some("succeeded"));
+
+    ws_stream
+        .send(Message::Text(
+            json!({
+                "type": "execute",
+                "request_id": "diff-staged-1",
+                "action": "git.diff_staged",
+                "params": {
+                    "repo_path": clone_path
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+
+    let diff_staged_task = wait_for_ws_task(&mut ws_stream, "diff-staged-1").await;
+    assert_eq!(diff_staged_task["status"].as_str(), Some("succeeded"));
+    assert_eq!(
+        diff_staged_task["result"]["has_changes"].as_bool(),
+        Some(true)
+    );
+    assert!(
+        diff_staged_task["result"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str() == Some("feature.txt"))
+    );
+    assert!(
+        diff_staged_task["result"]["diff_text"]
+            .as_str()
+            .unwrap()
+            .contains("hello from branch")
+    );
 
     ws_stream
         .send(Message::Text(
@@ -310,9 +374,25 @@ async fn rest_and_websocket_execute_git_actions_and_command_run() {
     let remote_head = run_git_capture(&["rev-parse", "refs/heads/main"], Some(&remote_repo)).await;
     assert_eq!(local_head, remote_head);
 
-    run_git(&["clone", remote_repo.to_str().unwrap(), collaborator_path.to_str().unwrap()], None).await;
-    run_git(&["config", "user.name", "Agent Test"], Some(&collaborator_path)).await;
-    run_git(&["config", "user.email", "agent@example.com"], Some(&collaborator_path)).await;
+    run_git(
+        &[
+            "clone",
+            remote_repo.to_str().unwrap(),
+            collaborator_path.to_str().unwrap(),
+        ],
+        None,
+    )
+    .await;
+    run_git(
+        &["config", "user.name", "Agent Test"],
+        Some(&collaborator_path),
+    )
+    .await;
+    run_git(
+        &["config", "user.email", "agent@example.com"],
+        Some(&collaborator_path),
+    )
+    .await;
     tokio::fs::write(collaborator_path.join("remote.txt"), "hello from remote\n")
         .await
         .unwrap();
@@ -342,9 +422,70 @@ async fn rest_and_websocket_execute_git_actions_and_command_run() {
     let pull_task = wait_for_ws_task(&mut ws_stream, "pull-1").await;
     assert_eq!(pull_task["status"].as_str(), Some("succeeded"));
     assert_eq!(
-        tokio::fs::read_to_string(clone_path.join("remote.txt")).await.unwrap(),
+        tokio::fs::read_to_string(clone_path.join("remote.txt"))
+            .await
+            .unwrap(),
         "hello from remote\n"
     );
+
+    let current_branch_response = client
+        .post(format!("{base_url}/tasks"))
+        .bearer_auth(token)
+        .json(&json!({
+            "action": "git.get_current_branch",
+            "params": {
+                "repo_path": clone_path
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(current_branch_response.status(), StatusCode::ACCEPTED);
+    let current_branch_payload = current_branch_response.json::<Value>().await.unwrap();
+    let current_branch_task_id = current_branch_payload["task"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let current_branch_task =
+        wait_for_task(&client, &base_url, token, &current_branch_task_id).await;
+    assert_eq!(current_branch_task["status"].as_str(), Some("succeeded"));
+    assert_eq!(
+        current_branch_task["result"]["current_branch"].as_str(),
+        Some("main")
+    );
+
+    let list_branches_response = client
+        .post(format!("{base_url}/tasks"))
+        .bearer_auth(token)
+        .json(&json!({
+            "action": "git.list_branches_structured",
+            "params": {
+                "repo_path": clone_path
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(list_branches_response.status(), StatusCode::ACCEPTED);
+    let list_branches_payload = list_branches_response.json::<Value>().await.unwrap();
+    let list_branches_task_id = list_branches_payload["task"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let list_branches_task = wait_for_task(&client, &base_url, token, &list_branches_task_id).await;
+    assert_eq!(list_branches_task["status"].as_str(), Some("succeeded"));
+    let branches = list_branches_task["result"]["branches"].as_array().unwrap();
+    assert!(branches.iter().any(|value| {
+        value["name"].as_str() == Some("main")
+            && value["scope"].as_str() == Some("local")
+            && value["current"].as_bool() == Some(true)
+    }));
+    assert!(branches.iter().any(|value| {
+        value["name"].as_str() == Some("feature/demo") && value["scope"].as_str() == Some("local")
+    }));
+    assert!(branches.iter().any(|value| {
+        value["name"].as_str() == Some("origin/main") && value["scope"].as_str() == Some("remote")
+    }));
 
     ws_stream
         .send(Message::Text(
@@ -371,7 +512,9 @@ async fn rest_and_websocket_execute_git_actions_and_command_run() {
         "main"
     );
     assert_eq!(
-        tokio::fs::read_to_string(clone_path.join("feature.txt")).await.unwrap(),
+        tokio::fs::read_to_string(clone_path.join("feature.txt"))
+            .await
+            .unwrap(),
         "hello from branch\n"
     );
 

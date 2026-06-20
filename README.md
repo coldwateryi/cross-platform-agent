@@ -52,7 +52,10 @@
 - `git.pull`
 - `git.push`
 - `git.status`
+- `git.get_current_branch`
+- `git.diff_staged`
 - `git.list_branches`
+- `git.list_branches_structured`
 
 ### 2.2 通用命令动作
 
@@ -195,6 +198,8 @@ cargo run
 - `AGENT_WS_PATH`
   - WebSocket 路径
   - 默认：`/ws`
+  - 会实际注册为 WebSocket 路由
+  - 支持传入 `ws` 或 `/ws`，最终都会规范化为以 `/` 开头的路径
 
 - `AGENT_API_TOKEN`
   - 可选鉴权令牌
@@ -307,6 +312,8 @@ curl \
 
 ```text
 ws://127.0.0.1:8787/ws?token=change-me
+
+如果配置了 `AGENT_WS_PATH`，则这里的 `/ws` 需要替换成配置后的路径。
 ```
 
 ### 9.1 客户端消息
@@ -498,7 +505,31 @@ ws://127.0.0.1:8787/ws?token=change-me
 }
 ```
 
-### 10.10 `git.list_branches`
+### 10.10 `git.get_current_branch`
+
+```json
+{
+  "action": "git.get_current_branch",
+  "params": {
+    "repo_path": "/absolute/path/to/repo"
+  }
+}
+```
+
+### 10.11 `git.diff_staged`
+
+返回当前暂存区 diff 文本和已暂存文件列表。
+
+```json
+{
+  "action": "git.diff_staged",
+  "params": {
+    "repo_path": "/absolute/path/to/repo"
+  }
+}
+```
+
+### 10.12 `git.list_branches`
 
 ```json
 {
@@ -509,7 +540,20 @@ ws://127.0.0.1:8787/ws?token=change-me
 }
 ```
 
-### 10.11 `command.run`
+### 10.13 `git.list_branches_structured`
+
+返回本地分支和远端分支的结构化 JSON 列表。
+
+```json
+{
+  "action": "git.list_branches_structured",
+  "params": {
+    "repo_path": "/absolute/path/to/repo"
+  }
+}
+```
+
+### 10.14 `command.run`
 
 ```json
 {

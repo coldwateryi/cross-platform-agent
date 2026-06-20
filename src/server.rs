@@ -1,4 +1,3 @@
-use std::future::Future;
 use axum::extract::Path;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -9,6 +8,7 @@ use axum::{Json, Router};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::future::Future;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
@@ -54,13 +54,14 @@ pub fn build_router(runtime: Runtime) -> Router {
         .allow_origin(Any)
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
         .allow_headers(Any);
+    let ws_path = runtime.config().ws_path.clone();
 
     Router::new()
         .route("/health", get(health))
         .route("/actions", get(list_actions))
         .route("/tasks", get(list_tasks).post(create_task))
         .route("/tasks/{task_id}", get(get_task))
-        .route("/ws", get(websocket_handler))
+        .route(&ws_path, get(websocket_handler))
         .layer(cors)
         .with_state(runtime)
 }
@@ -199,7 +200,10 @@ async fn handle_ws_message(
             )
             .await
         }
-        Ok(WsClientMessage::GetTask { request_id, task_id }) => {
+        Ok(WsClientMessage::GetTask {
+            request_id,
+            task_id,
+        }) => {
             let response = match parse_uuid(&task_id) {
                 Ok(task_id) => {
                     let task = runtime.get_task(task_id).await;
@@ -297,6 +301,5 @@ fn extract_token(headers: &HeaderMap) -> Option<String> {
 }
 
 fn parse_uuid(raw: &str) -> AppResult<Uuid> {
-    Uuid::parse_str(raw)
-        .map_err(|_| AppError::validation(format!("Invalid task id: {raw}")))
+    Uuid::parse_str(raw).map_err(|_| AppError::validation(format!("Invalid task id: {raw}")))
 }

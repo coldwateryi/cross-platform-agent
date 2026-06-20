@@ -54,13 +54,18 @@ fn comparable_path(path: &Path) -> String {
     }
 }
 
-pub fn ensure_allowed_path(input: &str, allowed_roots: &[PathBuf], field_name: &str) -> AppResult<PathBuf> {
+pub fn ensure_allowed_path(
+    input: &str,
+    allowed_roots: &[PathBuf],
+    field_name: &str,
+) -> AppResult<PathBuf> {
     let resolved = absolutize_path(input)?;
     let candidate = comparable_path(&resolved);
 
     let allowed = allowed_roots.iter().any(|root| {
         let root_cmp = comparable_path(root);
-        candidate == root_cmp || candidate.starts_with(&format!("{root_cmp}{}", std::path::MAIN_SEPARATOR))
+        candidate == root_cmp
+            || candidate.starts_with(&format!("{root_cmp}{}", std::path::MAIN_SEPARATOR))
     });
 
     if allowed {

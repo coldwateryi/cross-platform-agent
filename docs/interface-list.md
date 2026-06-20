@@ -3,14 +3,14 @@
 ## Overview
 
 - Base URL: `http://127.0.0.1:8787`
-- WebSocket URL: `ws://127.0.0.1:8787/ws`
+- WebSocket URL: `ws://127.0.0.1:8787/ws` by default, or `ws://127.0.0.1:8787${AGENT_WS_PATH}`
 - Auth:
   - `Authorization: Bearer <token>`
   - or `X-API-Token: <token>`
   - or WebSocket query parameter `?token=<token>`
 - Content type: `application/json`
 
-`/health` does not require auth. Other REST endpoints and `/ws` require auth only when `AGENT_API_TOKEN` is configured.
+`/health` does not require auth. Other REST endpoints and the configured WebSocket path require auth only when `AGENT_API_TOKEN` is configured.
 
 ## REST Endpoints
 
@@ -259,11 +259,48 @@ If push fails, the agent also attempts to show a native error dialog on the loca
 }
 ```
 
+### `git.get_current_branch`
+
+```json
+{
+  "action": "git.get_current_branch",
+  "params": {
+    "repo_path": "/absolute/path/to/repo"
+  }
+}
+```
+
+### `git.diff_staged`
+
+Returns the staged diff text and staged file list for the repository.
+
+```json
+{
+  "action": "git.diff_staged",
+  "params": {
+    "repo_path": "/absolute/path/to/repo"
+  }
+}
+```
+
 ### `git.list_branches`
 
 ```json
 {
   "action": "git.list_branches",
+  "params": {
+    "repo_path": "/absolute/path/to/repo"
+  }
+}
+```
+
+### `git.list_branches_structured`
+
+Returns local and remote branches as structured JSON records.
+
+```json
+{
+  "action": "git.list_branches_structured",
   "params": {
     "repo_path": "/absolute/path/to/repo"
   }
@@ -295,6 +332,8 @@ This action is intentionally restricted:
 ### Connect
 
 `ws://127.0.0.1:8787/ws?token=<token>`
+
+If `AGENT_WS_PATH` is configured, replace `/ws` with that configured path.
 
 ### Client messages
 

@@ -14,12 +14,15 @@ pub fn supports(action: &str) -> bool {
             | "git.add"
             | "git.checkout_branch"
             | "git.commit"
+            | "git.get_current_branch"
+            | "git.diff_staged"
             | "git.merge_branch"
             | "git.pull"
             | "git.push"
             | "git.fetch"
             | "git.status"
             | "git.list_branches"
+            | "git.list_branches_structured"
             | "command.run"
     )
 }
@@ -271,8 +274,38 @@ pub fn catalog() -> Vec<ActionDescriptor> {
             }],
         },
         ActionDescriptor {
+            name: "git.get_current_branch",
+            description: "Read the current local branch name.",
+            params: vec![ActionParamDescriptor {
+                name: "repo_path",
+                kind: "string",
+                required: true,
+                description: "Local repository path.",
+            }],
+        },
+        ActionDescriptor {
+            name: "git.diff_staged",
+            description: "Read the currently staged diff and staged file list.",
+            params: vec![ActionParamDescriptor {
+                name: "repo_path",
+                kind: "string",
+                required: true,
+                description: "Local repository path.",
+            }],
+        },
+        ActionDescriptor {
             name: "git.list_branches",
             description: "List local and remote branches.",
+            params: vec![ActionParamDescriptor {
+                name: "repo_path",
+                kind: "string",
+                required: true,
+                description: "Local repository path.",
+            }],
+        },
+        ActionDescriptor {
+            name: "git.list_branches_structured",
+            description: "List local and remote branches as structured JSON.",
             params: vec![ActionParamDescriptor {
                 name: "repo_path",
                 kind: "string",
@@ -313,12 +346,15 @@ pub async fn execute(action: &str, params: Value, context: ActionContext) -> App
         "git.add" => git::add(params, context).await,
         "git.checkout_branch" => git::checkout_branch(params, context).await,
         "git.commit" => git::commit(params, context).await,
+        "git.get_current_branch" => git::get_current_branch(params, context).await,
+        "git.diff_staged" => git::diff_staged(params, context).await,
         "git.merge_branch" => git::merge_branch(params, context).await,
         "git.pull" => git::pull(params, context).await,
         "git.push" => git::push(params, context).await,
         "git.fetch" => git::fetch(params, context).await,
         "git.status" => git::status(params, context).await,
         "git.list_branches" => git::list_branches(params, context).await,
+        "git.list_branches_structured" => git::list_branches_structured(params, context).await,
         "command.run" => command::run(params, context).await,
         _ => Err(AppError::validation(format!(
             "Unsupported action: {action}"

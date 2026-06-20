@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fmt::{Display, Formatter};
@@ -52,7 +52,12 @@ impl AppError {
     }
 
     pub fn unauthorized() -> Self {
-        Self::new(StatusCode::UNAUTHORIZED, "unauthorized", "Unauthorized.", None)
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "Unauthorized.",
+            None,
+        )
     }
 
     pub fn forbidden(message: impl Into<String>) -> Self {

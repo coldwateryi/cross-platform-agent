@@ -262,7 +262,11 @@ impl ActionContext {
         self.runtime.append_log(self.task_id, stream, message).await
     }
 
-    pub fn ensure_allowed_path(&self, input: &str, field_name: &str) -> AppResult<std::path::PathBuf> {
+    pub fn ensure_allowed_path(
+        &self,
+        input: &str,
+        field_name: &str,
+    ) -> AppResult<std::path::PathBuf> {
         ensure_allowed_path(input, &self.config().allowed_roots, field_name)
     }
 

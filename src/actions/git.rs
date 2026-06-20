@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::fs;
 
@@ -108,9 +108,20 @@ struct RepoPathParams {
     repo_path: String,
 }
 
+#[derive(Debug, Serialize)]
+struct BranchRecord {
+    name: String,
+    scope: &'static str,
+    commit: String,
+    current: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    upstream: Option<String>,
+}
+
 pub async fn clone_repository(params: Value, context: ActionContext) -> AppResult<Value> {
     let params = parse::<CloneParams>(params)?;
-    let destination_path = context.ensure_allowed_path(&params.destination_path, "destination_path")?;
+    let destination_path =
+        context.ensure_allowed_path(&params.destination_path, "destination_path")?;
 
     if let Some(parent) = destination_path.parent() {
         fs::create_dir_all(parent).await.map_err(|error| {
@@ -433,6 +444,61 @@ pub async fn status(params: Value, context: ActionContext) -> AppResult<Value> {
     }))
 }
 
+pub async fn get_current_branch(params: Value, context: ActionContext) -> AppResult<Value> {
+    let params = parse::<RepoPathParams>(params)?;
+    let repo_path = context.ensure_allowed_path(&params.repo_path, "repo_path")?;
+    let branch = current_branch(&context, repo_path.clone()).await?;
+
+    Ok(json!({
+        "action": "git.get_current_branch",
+        "repository_path": repo_path,
+        "current_branch": branch,
+    }))
+}
+
+pub async fn diff_staged(params: Value, context: ActionContext) -> AppResult<Value> {
+    let params = parse::<RepoPathParams>(params)?;
+    let repo_path = context.ensure_allowed_path(&params.repo_path, "repo_path")?;
+
+    let diff = context
+        .run_program(
+            &context.config().git_binary,
+            &["diff".to_string(), "--cached".to_string()],
+            Some(repo_path.clone()),
+            RunOptions::QUIET,
+        )
+        .await?;
+    let files = context
+        .run_program(
+            &context.config().git_binary,
+            &[
+                "diff".to_string(),
+                "--cached".to_string(),
+                "--name-only".to_string(),
+            ],
+            Some(repo_path.clone()),
+            RunOptions::QUIET,
+        )
+        .await?;
+
+    let files = files
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let diff_text = diff.stdout;
+
+    Ok(json!({
+        "action": "git.diff_staged",
+        "repository_path": repo_path,
+        "has_changes": !files.is_empty(),
+        "files": files,
+        "diff_text": diff_text,
+    }))
+}
+
 pub async fn list_branches(params: Value, context: ActionContext) -> AppResult<Value> {
     let params = parse::<RepoPathParams>(params)?;
     let repo_path = context.ensure_allowed_path(&params.repo_path, "repo_path")?;
@@ -458,14 +524,50 @@ pub async fn list_branches(params: Value, context: ActionContext) -> AppResult<V
     }))
 }
 
+pub async fn list_branches_structured(params: Value, context: ActionContext) -> AppResult<Value> {
+    let params = parse::<RepoPathParams>(params)?;
+    let repo_path = context.ensure_allowed_path(&params.repo_path, "repo_path")?;
+    let current = current_branch(&context, repo_path.clone()).await?;
+
+    let local_output = context
+        .run_program(
+            &context.config().git_binary,
+            &[
+                "branch".to_string(),
+                "--format=%(refname:short)\t%(objectname)\t%(upstream:short)".to_string(),
+            ],
+            Some(repo_path.clone()),
+            RunOptions::QUIET,
+        )
+        .await?;
+    let remote_output = context
+        .run_program(
+            &context.config().git_binary,
+            &[
+                "branch".to_string(),
+                "--remotes".to_string(),
+                "--format=%(refname:short)\t%(objectname)".to_string(),
+            ],
+            Some(repo_path.clone()),
+            RunOptions::QUIET,
+        )
+        .await?;
+
+    let mut branches = parse_local_branches(&local_output.stdout, &current);
+    branches.extend(parse_remote_branches(&remote_output.stdout));
+
+    Ok(json!({
+        "action": "git.list_branches_structured",
+        "repository_path": repo_path,
+        "branches": branches,
+    }))
+}
+
 async fn describe_repository(context: &ActionContext, repo_path: PathBuf) -> AppResult<Value> {
     context
         .run_program(
             &context.config().git_binary,
-            &[
-                "rev-parse".to_string(),
-                "--is-inside-work-tree".to_string(),
-            ],
+            &["rev-parse".to_string(), "--is-inside-work-tree".to_string()],
             Some(repo_path.clone()),
             RunOptions::QUIET,
         )
@@ -561,6 +663,57 @@ async fn try_capture(
         .ok()
         .map(|output| output.stdout.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn parse_local_branches(output: &str, current_branch: &str) -> Vec<BranchRecord> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            let name = fields.next()?.trim();
+            let commit = fields.next()?.trim();
+            let upstream = fields
+                .next()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned);
+
+            if name.is_empty() || commit.is_empty() {
+                return None;
+            }
+
+            Some(BranchRecord {
+                name: name.to_string(),
+                scope: "local",
+                commit: commit.to_string(),
+                current: name == current_branch,
+                upstream,
+            })
+        })
+        .collect()
+}
+
+fn parse_remote_branches(output: &str) -> Vec<BranchRecord> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            let name = fields.next()?.trim();
+            let commit = fields.next()?.trim();
+
+            if name.is_empty() || commit.is_empty() {
+                return None;
+            }
+
+            Some(BranchRecord {
+                name: name.to_string(),
+                scope: "remote",
+                commit: commit.to_string(),
+                current: false,
+                upstream: None,
+            })
+        })
+        .collect()
 }
 
 fn parse<T>(value: Value) -> AppResult<T>
